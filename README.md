@@ -38,7 +38,7 @@ Selanjutnya, fungsi akan menggunakan rangkaian method chaining, diawali dengan `
 
 Setelah itu, saya menjalankan perintah `cargo run`, lalu mengakses URL `http://127.0.0.1:7878/` dan mendapatkan output berikut:
 
-```
+```console
 PS E:\Semester 4\Adpro\W06\hello> cargo run
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.02s
      Running `target\debug\hello.exe`
@@ -63,3 +63,49 @@ Request: [
 ```
 
 Output tersebut merupakan hasil permintaan HTTP yang diterima oleh server, dimulai dengan baris `GET / HTTP/1.1` yang menandakan permintaan GET untuk halaman root menggunakan protokol HTTP versi 1.1. Kemudian, ada `Host: 127.0.0.1:7878` yang menentukan tujuan _request_ serta `Connection: keep-alive` dan `Cache-Control: max-age=0` yang mengatur perilaku _connection_ dan _caching_. Informasi terkait browser dapat dilihat pada header `sec-ch-ua`, `sec-ch-ua-mobile`, `sec-ch-ua-platform`, dan `User-Agent` yang mengidentifikasi Chrome 134 pada Windows. Kemudian, terdapat `Upgrade-Insecure-Requests: 1` yang menunjukkan preferensi untuk koneksi yang aman. Lalu, terdapat header `Accept` yang menunjukkan tipe konten yang didukung, diikuti oleh header keamanan seperti `Sec-Fetch-Site`, `Sec-Fetch-Mode`, `Sec-Fetch-User`, dan `Sec-Fetch-Dest` yang mengendalikan _behaviour_ dalam pengambilan konten. Terakhir, `Accept-Encoding` menunjukkan algoritma kompresi yang didukung dan `Accept-Language` menunjukkan preferensi bahasa pengguna.
+
+## Commit 2 Reflection
+
+![Commit 2 Screen Capture](/assets/images/commit2.jpg)
+
+```rust
+use std::{
+    fs,
+    ...
+};
+
+...
+
+fn handle_connection(mut stream: TcpStream) {
+    ...
+
+    let status_line = "HTTP/1.1 200 OK";
+    let contents = fs::read_to_string("hello.html").unwrap();
+    let length = contents.len();
+
+    let response = format!("{status_line}\r\nContent-Length: {length}\r\n\r\n{contents}");
+    stream.write_all(response.as_bytes()).unwrap();
+}
+```
+
+Pada commit 2, fungsi `handle_connection` telah kita perbarui untuk tidak sekedar hanya membaca HTTP _request_, tetapi juga mengirimkan respons HTTP kembali ke klien. Kode baru ini menambahkan fungsionalitas untuk membuat respons HTTP yang lengkap dengan status line `HTTP/1.1 200 OK1`, membaca isi file `hello.html` dengan menggunakan fungsi `fs::read_to_string`, menghitung panjang konten dengan `contens.len()`, dan kemudian merangkai semua komponen tersebut menjadi String respons yang valid menggunakan `format!`. Kemudian, respons HTTP yang telah dirangkai tersebut akan dikirimkan kembali ke klien melalui _stream_ TCP dengan memanfaatkan metode `write_all`, sehingga sekarang server kita tidak hanya menerima _request_ tetapi juga mengirimkan HTML _page_ sebagai respons.
+
+Pada saat menjalankan perintah `cargo run`, saya mendapatkan output berikut:
+
+```console
+PS E:\Semester 4\Adpro\W06\hello> cargo run
+   Compiling hello v0.1.0 (E:\Semester 4\Adpro\W06\hello)
+warning: unused variable: `http_request`
+  --> src\main.rs:19:9
+   |
+19 |     let http_request: Vec<_> = buf_reader
+   |         ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_http_request`
+   |
+   = note: `#[warn(unused_variables)]` on by default
+
+warning: `hello` (bin "hello") generated 1 warning
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.49s
+     Running `target\debug\hello.exe`
+```
+
+Output tersebut menunjukkan bahwa program Rust berhasil di-_compile_, tetapi menghasilkan satu peringatan (_warning_). Peringatan tersebut memberitahu bahwa variabel `http_request` yang didefinisikan dalam fungsi `handle_connection` tidak digunakan dalam kode. _Compiler_ menyarankan kita untuk menambahkan awalan _underscore_ jika memang variabel tersebut sengaja tidak digunakan. Meskipun ada peringatan tersebut, program tetap berhasil di-_compile_ dan dijalankan dalam mode _development_ dengan profil debug yang _unoptimized_.
