@@ -198,4 +198,92 @@ fn handle_connection(mut stream: TcpStream) {
 }
 ```
 
-Perubahan pada commit 4 ini menunjukkan pengembangan lanjutan dari fungsi `handle_connection` dengan beberapa peningkatan penting. Pertama, kita mengubah pernyataan `if-else` menjadi ekspresi `match`, dengan melakukan pattern matching pada slice dari string _request line_. Kedua, selain menangani rute utama dan rute yang tidak valid, code kita sekarang juga menangani rute baru `GET /sleep HTTP/1.1`. Rute ini secara sengaja dibuat untuk memperkenalkan penundaan selama 10 detik sebelum mengirimkan respons. Terakhir, klausa `_` digunakan pada ekspresi `match` sebagai `catch-all` untuk menangani semua pola permintaan lainnya, memberikan respons 404 untuk semua rute yang tidak kita kenali.
+Perubahan pada commit 4 ini menunjukkan pengembangan lanjutan dari fungsi `handle_connection` dengan beberapa peningkatan penting. Pertama, kita mengubah pernyataan `if-else` menjadi ekspresi `match`, dengan melakukan pattern matching pada slice dari string _request line_. Kedua, selain menangani rute utama dan rute yang tidak valid, code kita sekarang juga menangani rute baru `GET /sleep HTTP/1.1`. Terakhir, klausa `_` digunakan pada ekspresi `match` sebagai `catch-all` untuk menangani semua pola permintaan lainnya, memberikan respons 404 untuk semua rute yang tidak kita kenali.
+
+Rute `/sleep` sendiri dibuat untuk mensimulasikan permasalahan pada aplikasi single-threaded. Dengan menambahkan delay 10 detik menggunakan `thread::sleep`, rute ini memperlihatkan bagaimana satu _request_ yang memakan waktu lama akan memblokir seluruh server. Saat browser pertama mengakses `/sleep`, server akan menjadi tidak responsif terhadap request lain hingga proses delay selesai.
+
+Hal ini terjadi karena dalam arsitektur single-htreaded, server hanya dapat melayani satu koneksi pada satu waktu. Di dalam loop `for stream in listener.incoming()`, setiap koneksi diproses secara _sequential_ dan harus selesai sebelum koneksi berikutnya ditangani. Simulasi ini dengan jelas menunjukkan betapa pentingnya konsep multi-threading untuk layanan web app sejenis.
+
+## Commit 5 Reflection
+
+Pada commit 5, terdapat sedikit perubahan pada `main.rs` dan ada file baru bernama `lib.rs`. Berikut adalah kodenya:
+
+```rust
+// main.rs
+use hello::ThreadPool;
+
+fn main() {
+    let listener = TcpListener::bind("127.0.0.1:7878").unwrap();
+    let pool = ThreadPool::new(4);
+
+    for stream in listener.incoming() {
+        let stream = stream.unwrap();
+
+        pool.execute(|| {
+            handle_connection(stream);
+        });
+    }
+}
+```
+
+```rust
+// lib.rs
+use std::{
+    sync::{mpsc, Arc, Mutex},
+    thread::{self, JoinHandle},
+};
+
+pub struct ThreadPool {
+    workers: Vec<Worker>,
+    sender: mpsc::Sender<Job>,
+}
+
+type Job = Box<dyn FnOnce() + Send + 'static>;
+
+impl ThreadPool {
+    pub fn new(size: usize) -> ThreadPool {
+        assert!(size > 0);
+
+        let (sender, receiver) = mpsc::channel();
+        let receiver = Arc::new(Mutex::new(receiver));
+
+        let mut workers = Vec::with_capacity(size);
+
+        for id in 0..size {
+            workers.push(Worker::new(id, Arc::clone(&receiver)));
+        }
+
+        ThreadPool { workers, sender }
+    }
+
+    pub fn execute<F>(&self, f: F)
+    where
+        F: FnOnce() + Send + 'static,
+    {
+        let job = Box::new(f);
+
+        self.sender.send(job).unwrap();
+    }
+}
+
+struct Worker {
+    id: usize,
+    thread: thread::JoinHandle<()>,
+}
+
+impl Worker {
+    fn new(id: usize, receiver: Arc<Mutex<mpsc::Receiver<Job>>>) -> Worker {
+        let thread = thread::spawn(move || loop {
+            let job = receiver.lock().unwrap().recv().unwrap();
+            println!("Worker {id} got a job; executing.");
+            job();
+        });
+
+        Worker { id, thread }
+    }
+}
+```
+
+Berdasarkan kedua kode tersebut, server telah diperbarui menjadi model multithreaded dengan implementasi Thread Pool untuk manangani _concurrency_. Pada `main.rs`, perubahan utama adalah pembuatan instance `ThreadPool` dengan 4 thread worker dan penggunaan metode `pool.execute()` untuk membagi penanganan koneksi ke thread pool. Hal ini memungkinkan server untuk menangani beberapa koneksi secara bersamaan tanpa blocking satu sama lain.
+
+File `lib.rs` sendiri mengimplementasikan infrastruktur thread pool dengan struktur `ThreadPool` yang berisikan kumpulan `Worker` dan sistem komunikasi berbasis channel. Setiap `Worker` memiliki thread yang berjalan dalam _infinite loop_, menunggu pekerjaan dari channel yang dibagikan menggunakan `Arc<Mutex<>>`. Ketika method `execute()` dipanggil, pekerjaan akan dibungkus dalam `Box` dan dikirim melalui channel ke salah satu worker yang tersedia. Implementasi ini memanfaatkan beberapa fitur dalam Rust seperti ownership untuk menciptakan sistem _concurrency_ yang aman dan efisien. Hal ini dibuktikan dengan tidak adanya delay ketika mengakses page lain ketika membuka rute `/sleep`.
