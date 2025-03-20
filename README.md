@@ -169,3 +169,33 @@ fn handle_connection(mut stream: TcpStream) {
 ```
 
 Selanjutnya, dengan memanfaatkan refactoring, fungsi `handle_connection` menjadi lebih ringkas. Perubahan utama terletak pada penggunaan _tuple pattern matching_ untuk menentapkan nilai dari `status_line` dan `filename` dalam satu operasi. Dengan memanfaatkan pendekatan ini, kita dapat menghilangkan duplikasi kode yang terjadi saat membuat respons untuk kedua kasus, karena sekarang kode kita akan membaca file, menghitung panjang konten, dan mengirim respons dalam sekali jalan. Hal ini menerapkan prinsip DRY yang telah dipelajari pada materi sebelumnya. 
+
+## Commit 4 Reflection
+
+Pada commit 4, terdapat beberapa perubahan code sebagai berikut:
+
+```rust
+fn handle_connection(mut stream: TcpStream) {
+    let buf_reader = BufReader::new(&stream);
+    let request_line = buf_reader.lines().next().unwrap().unwrap();
+
+    let (status_line, filename) = match &request_line[..] {
+        "GET / HTTP/1.1" => ("HTTP/1.1 200 OK", "hello.html"),
+        "GET /sleep HTTP/1.1" => {
+            thread::sleep(Duration::from_secs(10));
+            ("HTTP/1.1 200 OK", "hello.html")
+        }
+        _ => ("HTTP/1.1 404 NOT FOUND", "404.html"),
+    };
+
+    let contents = fs::read_to_string(filename).unwrap();
+    let length = contents.len();
+
+    let response =
+        format!("{status_line}\r\nContent-Length: {length}\r\n\r\n{contents}");
+
+    stream.write_all(response.as_bytes()).unwrap();
+}
+```
+
+Perubahan pada commit 4 ini menunjukkan pengembangan lanjutan dari fungsi `handle_connection` dengan beberapa peningkatan penting. Pertama, kita mengubah pernyataan `if-else` menjadi ekspresi `match`, dengan melakukan pattern matching pada slice dari string _request line_. Kedua, selain menangani rute utama dan rute yang tidak valid, code kita sekarang juga menangani rute baru `GET /sleep HTTP/1.1`. Rute ini secara sengaja dibuat untuk memperkenalkan penundaan selama 10 detik sebelum mengirimkan respons. Terakhir, klausa `_` digunakan pada ekspresi `match` sebagai `catch-all` untuk menangani semua pola permintaan lainnya, memberikan respons 404 untuk semua rute yang tidak kita kenali.
